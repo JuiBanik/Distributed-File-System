@@ -2,7 +2,9 @@ package com.ds.project;
 
 import com.ds.models.FileDownloadData;
 import com.ds.models.FileMetadata;
+import com.ds.models.ResponseMessage;
 import com.ds.util.ChunkUtil;
+import com.ds.util.Constants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -42,7 +44,7 @@ public class DocumentServerController {
     @PostMapping(value = "/upload",
             consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_JSON_VALUE},
             produces = {MediaType.APPLICATION_JSON_VALUE})
-    public ResponseEntity<?> uploadDocument(@ModelAttribute FileMetadata fileMetadata) {
+    public ResponseEntity<ResponseMessage> uploadDocument(@ModelAttribute FileMetadata fileMetadata) {
         System.out.println(fileMetadata.getChunkToWorkerMap());
         try {
             Map<String, List<String>> chunkWorkerMap = objectMapper.readValue(fileMetadata.getChunkToWorkerMap(), Map.class);
@@ -58,11 +60,17 @@ public class DocumentServerController {
             for (String chunkId: chunkIdToFileNameMap.keySet()) {
                 Files.delete(Paths.get(chunkIdToFileNameMap.get(chunkId)));
             }
+            ResponseMessage responseMessage = new ResponseMessage();
+            responseMessage.setStatus("Success");
+            responseMessage.setMessage("File Upload Successful");
+            return ResponseEntity.ok(responseMessage);
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.internalServerError().body("File upload failed");
+            ResponseMessage responseMessage = new ResponseMessage();
+            responseMessage.setStatus("Failed");
+            responseMessage.setMessage("File Upload Failed " + e.getMessage());
+            return ResponseEntity.internalServerError().body(responseMessage);
         }
-        return ResponseEntity.ok("File uploaded successfully.");
     }
 
     @PostMapping(value = "/download",
@@ -84,23 +92,37 @@ public class DocumentServerController {
     }
 
     @PostMapping(value = "/delete")
-    public ResponseEntity<String> deleteDocument(@ModelAttribute FileDownloadData fileDownloadData) throws Exception {
-        Map<String, List<String>> chunkWorkerMap = objectMapper.readValue(
-                fileDownloadData.getChunkToWorkerMap(), Map.class);
-        String fileId = fileDownloadData.getFileId();
-        for (String chunkId: chunkWorkerMap.keySet()) {
-            List<String> workers = chunkWorkerMap.get(chunkId);
-            String workerId = workers.get(0);
-            MultiValueMap<String, Object> map = new LinkedMultiValueMap<String, Object>();
-            map.add("chunkId", chunkId);
-            for (String worker : workers) {
-                map.add("listOfWorkers", worker);
+    public ResponseEntity<ResponseMessage> deleteDocument(@ModelAttribute FileDownloadData fileDownloadData) throws Exception {
+        try {
+            Map<String, List<String>> chunkWorkerMap = objectMapper.readValue(
+                    fileDownloadData.getChunkToWorkerMap(), Map.class);
+            String fileId = fileDownloadData.getFileId();
+            for (String chunkId : chunkWorkerMap.keySet()) {
+                List<String> workers = chunkWorkerMap.get(chunkId);
+                String workerId = workers.get(0);
+                MultiValueMap<String, Object> map = new LinkedMultiValueMap<String, Object>();
+                map.add("chunkId", chunkId);
+                for (String worker : workers) {
+                    map.add("listOfWorkers", worker);
+                }
+                RestTemplate restTemplate = new RestTemplate();
+                ResponseMessage response = restTemplate.postForObject(new URI(workerId + "/deletechunk"), map,
+                        ResponseMessage.class);
+                if (!Constants.SUCCESS.equalsIgnoreCase(response.getStatus())) {
+                    throw new RuntimeException("Error deleting chunk. " +  response.getMessage());
+                }
             }
-            RestTemplate restTemplate = new RestTemplate();
-            String response = restTemplate.postForObject(new URI(workerId + "/deletechunk"), map, String.class);
-            System.out.println(response);
+            ResponseMessage responseMessage = new ResponseMessage();
+            responseMessage.setStatus("Success");
+            responseMessage.setMessage(String.format("Successfully deleted file with id: %s", fileId));
+            return ResponseEntity.ok(responseMessage);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            ResponseMessage responseMessage = new ResponseMessage();
+            responseMessage.setStatus("Failed");
+            responseMessage.setMessage("Failed to delete file. " + ex.getMessage());
+            return ResponseEntity.internalServerError().body(responseMessage);
         }
-        return ResponseEntity.ok(String.format("Successfully deleted file with id: %s", fileId));
     }
 
     private File[] getChunksFromWorkers(Map<String, List<String>> chunkWorkerMap) throws URISyntaxException, IOException {
@@ -129,8 +151,10 @@ public class DocumentServerController {
 
             MultiValueMap<String, Object> map = getChunkInputMap(chunkId, chunkFileName, workerList);
             RestTemplate restTemplate = new RestTemplate();
-            String result = restTemplate.postForObject(uri, map, String.class);
-            System.out.println(result);
+            ResponseMessage result = restTemplate.postForObject(uri, map, ResponseMessage.class);
+            if (!Constants.SUCCESS.equalsIgnoreCase(result.getStatus())) {
+                throw new RuntimeException("Error sending chunk to workers. " + result.getMessage());
+            }
         }
     }
 
