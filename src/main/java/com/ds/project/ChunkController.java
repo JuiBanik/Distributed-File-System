@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
@@ -113,11 +114,16 @@ public class ChunkController {
         responseHeaders.add("content-disposition",
                 String.format("attachment;filename=%s", chunkId));
         responseHeaders.add("Content-Type",MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        Path filePath = Paths.get(localRoot + chunkId);
+        if (Files.isRegularFile(filePath)) {
+            return ResponseEntity.ok()
+                    .headers(responseHeaders)
+                    .contentType(MediaType.parseMediaType("application/octet-stream"))
+                    .body(new FileSystemResource(filePath));
+        } else {
+            return ResponseEntity.badRequest().build();
+        }
 
-        return ResponseEntity.ok()
-                .headers(responseHeaders)
-                .contentType(MediaType.parseMediaType("application/octet-stream"))
-                .body(new FileSystemResource(Paths.get(localRoot + chunkId)));
     }
 
     private MultiValueMap<String, Object> getChunkInputMap(ChunkFileWithReplicaData chunkFileWithReplicaData, List<String> workersList) throws IOException {

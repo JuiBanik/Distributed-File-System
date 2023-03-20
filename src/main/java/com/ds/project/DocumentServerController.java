@@ -126,16 +126,25 @@ public class DocumentServerController {
     }
 
     private File[] getChunksFromWorkers(Map<String, List<String>> chunkWorkerMap) throws URISyntaxException, IOException {
-        List<File> files = new ArrayList<>();
         File[] fileList = new File[chunkWorkerMap.keySet().size()];
         int i = 0;
         for (String chunkId: chunkWorkerMap.keySet()) {
-            String workerId = chunkWorkerMap.get(chunkId).get(0);
-            URL website = new URL(workerId + String.format("/chunk?chunkId=%s", chunkId));
-            try (InputStream in = website.openStream()) {
-                fileList[i] = ChunkUtil.saveFile(localRoot, in, chunkId);
+            for (int j=0;j<chunkWorkerMap.get(chunkId).size();j++) {
+                String workerId = chunkWorkerMap.get(chunkId).get(j);
+                try {
+                    URL website = new URL(workerId + String.format("/chunk?chunkId=%s", chunkId));
+                    try (InputStream in = website.openStream()) {
+                        fileList[i] = ChunkUtil.saveFile(localRoot, in, chunkId);
+                    }
+                    i++;
+                    break;
+                } catch (Exception ex) {
+                    if (j==chunkWorkerMap.get(chunkId).size()-1) {
+                        throw ex;
+                    }
+                    System.out.println("Error from worker, trying next replica");
+                }
             }
-            i++;
         }
         return fileList;
     }
